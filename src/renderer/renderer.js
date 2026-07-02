@@ -24,6 +24,7 @@ import * as Dialogs from './dialogs.js';
 const state = {
   layout: null,                 // root node of the tiling tree
   panes: new Map(),             // paneId -> TerminalPane
+  paneEls: new Map(),           // paneId -> the .pane DOM element (cached to avoid xterm re-render)
   activePaneId: null,
   activeThemeName: 'dark',
   currentWorkspaceName: null,
@@ -170,16 +171,15 @@ async function renderLayout() {
       if (!validIds.has(id)) {
         pane.dispose();
         state.panes.delete(id);
+        state.paneEls.delete(id);
       }
     }
 
-    // Detach all live xterm elements BEFORE clearing the DOM. This prevents
-    // xterm from seeing a removal (which triggers internal re-renders that
-    // duplicate viewport content when the element is reattached).
-    for (const pane of state.panes.values()) {
-      if (pane.term && pane.term.element && pane.term.element.parentNode) {
-        pane.term.element.parentNode.removeChild(pane.term.element);
-      }
+    // Detach cached pane DOM elements before clearing. They'll be reinserted
+    // by buildPane, keeping the xterm element in its original parent so it
+    // never triggers an internal re-render (which causes content duplication).
+    for (const el of state.paneEls.values()) {
+      if (el.parentNode) el.parentNode.removeChild(el);
     }
 
     rootEl.innerHTML = '';
@@ -246,6 +246,23 @@ async function buildSplit(node) {
 }
 
 async function buildPane(node) {
+  // If we already have a cached DOM element for this pane, reuse it entirely.
+  // This avoids moving the xterm element between parents, which triggers
+  // xterm internal re-renders that duplicate viewport content on ConPTY.
+  const cached = state.paneEls.get(node.id);
+  if (cached && state.panes.has(node.id)) {
+    // Update the title in case it changed.
+    const titleEl = cached.querySelector('.pane-title');
+    if (titleEl) titleEl.textContent = node.title || 'shell';
+    // Re-wire drag for the new layout position.
+    wireDrag(cached.querySelector('.pane-header'), cached, node);
+    requestAnimationFrame(() => {
+      const pane = state.panes.get(node.id);
+      if (pane) pane.fit();
+    });
+    return cached;
+  }
+
   const paneEl = document.createElement('div');
   paneEl.className = 'pane';
   paneEl.dataset.paneId = node.id;
@@ -266,7 +283,10 @@ async function buildPane(node) {
   btnGroup.className = 'pane-header-btns';
 
   // History toggle button — only shown when scrollback data exists.
+  const termEl = document.createElement('div');
+  termEl.className = 'pane-term';
   let sbPanel = null;
+
   if (hasScrollback) {
     const histBtn = document.createElement('button');
     histBtn.className = 'pane-header-btn';
@@ -298,13 +318,9 @@ async function buildPane(node) {
   btnGroup.appendChild(configBtn);
 
   header.appendChild(btnGroup);
-
   paneEl.appendChild(header);
 
   // Scrollback panel: shown by default on restore unless previously dismissed.
-  const termEl = document.createElement('div');
-  termEl.className = 'pane-term';
-
   const showScrollback = hasScrollback && !dismissedScrollback.has(node.id)
     && !(state.settings && state.settings.scrollbackHidden);
   if (showScrollback) {
@@ -316,7 +332,6 @@ async function buildPane(node) {
 
   paneEl.addEventListener('mousedown', () => setActivePane(node.id));
 
-  // Double-click the title text to rename; double-click elsewhere on header to zoom.
   titleSpan.addEventListener('dblclick', (e) => {
     e.stopPropagation();
     startRename(node, titleSpan);
@@ -328,35 +343,28 @@ async function buildPane(node) {
   });
   wireDrag(header, paneEl, node);
 
-  // Reuse an existing terminal if we have one; else create + attach.
-  let pane = state.panes.get(node.id);
-  if (!pane) {
-    const theme = Theme.applyTheme(state.activeThemeName);
-    pane = new TerminalPane(node, theme, {
-      xtermThemeFrom: Theme.xtermThemeFrom,
-      fontFor: Theme.fontFor,
-    }, {
-      onTitle: (paneId, title) => updatePaneTitle(paneId, title),
-      onCwd: (paneId, cwd) => { const n = findPane(state.layout, paneId); if (n) n.cwd = cwd; },
-      onExit: () => { /* pane keeps its final output; user closes it manually */ },
-      onActivity: (paneId) => {
-        // Flash the header of background panes when they receive output.
-        if (paneId !== state.activePaneId) {
-          const hdr = document.querySelector(`.pane[data-pane-id="${paneId}"] .pane-header`);
-          if (hdr && !hdr.classList.contains('has-activity')) {
-            hdr.classList.add('has-activity');
-          }
+  // Create the terminal and attach it.
+  const theme = Theme.applyTheme(state.activeThemeName);
+  const pane = new TerminalPane(node, theme, {
+    xtermThemeFrom: Theme.xtermThemeFrom,
+    fontFor: Theme.fontFor,
+  }, {
+    onTitle: (paneId, title) => updatePaneTitle(paneId, title),
+    onCwd: (paneId, cwd) => { const n = findPane(state.layout, paneId); if (n) n.cwd = cwd; },
+    onExit: () => { /* pane keeps its final output; user closes it manually */ },
+    onActivity: (paneId) => {
+      if (paneId !== state.activePaneId) {
+        const hdr = document.querySelector(`.pane[data-pane-id="${paneId}"] .pane-header`);
+        if (hdr && !hdr.classList.contains('has-activity')) {
+          hdr.classList.add('has-activity');
         }
-      },
-    });
-    state.panes.set(node.id, pane);
-    await pane.attach(termEl);
-    applyFontOverrideTo(pane);
-  } else {
-    termEl.appendChild(pane.term.element);
-    applyFontOverrideTo(pane);
-    requestAnimationFrame(() => pane.fit());
-  }
+      }
+    },
+  });
+  state.panes.set(node.id, pane);
+  state.paneEls.set(node.id, paneEl);
+  await pane.attach(termEl);
+  applyFontOverrideTo(pane);
 
   return paneEl;
 }
@@ -487,7 +495,7 @@ async function closeActive() {
   }
 
   const pane = state.panes.get(activeId);
-  if (pane) { pane.dispose(); state.panes.delete(activeId); }
+  if (pane) { pane.dispose(); state.panes.delete(activeId); state.paneEls.delete(activeId); }
 
   state.layout = removeLeaf(state.layout, activeId);
   state.activePaneId = null;
@@ -833,7 +841,7 @@ async function openPaneConfig(node) {
   });
   if (restart) {
     const pane = state.panes.get(node.id);
-    if (pane) { pane.dispose(); state.panes.delete(node.id); }
+    if (pane) { pane.dispose(); state.panes.delete(node.id); state.paneEls.delete(node.id); }
     await renderLayout();
   }
 }
@@ -1019,6 +1027,7 @@ window.modterm.onBeforeClose(async () => {
 async function openWorkspace(ws) {
   for (const pane of state.panes.values()) pane.dispose();
   state.panes.clear();
+  state.paneEls.clear();
   state.activePaneId = null;
   state.zoomedPaneId = null;
   dismissedScrollback.clear();

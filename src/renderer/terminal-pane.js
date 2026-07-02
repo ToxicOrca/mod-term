@@ -119,13 +119,15 @@ export class TerminalPane {
     try {
       this.fitAddon.fit();
       const { cols, rows } = this.term;
-      // Only send a pty resize if the dimensions actually changed. ConPTY
-      // redraws the screen on every resize, which duplicates buffer content
-      // when the size hasn't changed (e.g. after a drag-to-rearrange).
       if (cols !== this._lastCols || rows !== this._lastRows) {
         this._lastCols = cols;
         this._lastRows = rows;
-        window.modterm.resizePty(this.paneId, cols, rows);
+        // Debounce the pty resize so rapid layout changes (drag, window
+        // resize) only fire once after the layout stabilizes.
+        clearTimeout(this._resizeTimer);
+        this._resizeTimer = setTimeout(() => {
+          window.modterm.resizePty(this.paneId, cols, rows);
+        }, 100);
       }
     } catch (_) { /* element not sized yet */ }
   }
