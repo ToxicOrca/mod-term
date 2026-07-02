@@ -7,3 +7,4 @@ Thumbs.db
 *.env.local
 .vscode/
 .idea/
+CLAUDE.md

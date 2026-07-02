@@ -306,6 +306,21 @@ async function buildPane(node) {
     btnGroup.appendChild(histBtn);
   }
 
+  // Clear/refresh button — fixes ConPTY resize artifacts.
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'pane-header-btn';
+  clearBtn.textContent = '\u21BA';
+  clearBtn.title = 'Clear & refresh (Ctrl+Shift+K)';
+  clearBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const pane = state.panes.get(node.id);
+    if (pane) {
+      pane.term.clear();
+      window.modterm.sendInput(node.id, '\x0c');
+    }
+  });
+  btnGroup.appendChild(clearBtn);
+
   // Settings gear button.
   const configBtn = document.createElement('button');
   configBtn.className = 'pane-header-btn';
@@ -503,6 +518,17 @@ async function closeActive() {
 }
 
 // Restore the most recently closed pane.
+// Clear/refresh the active pane. Sends Ctrl+L to the shell which forces
+// a clean redraw — useful after resize artifacts from ConPTY.
+function clearActivePane() {
+  ensureActivePane();
+  const pane = state.panes.get(state.activePaneId);
+  if (pane) {
+    pane.term.clear();
+    window.modterm.sendInput(state.activePaneId, '\x0c'); // Ctrl+L
+  }
+}
+
 async function undoClosePane() {
   if (closedPaneStack.length === 0) return;
   if (state.zoomedPaneId) return;
@@ -1177,6 +1203,7 @@ function wireShortcuts() {
     else if (e.ctrlKey && e.shiftKey && k === 'd') { e.preventDefault(); e.stopPropagation(); splitActive('row'); }
     else if (e.ctrlKey && e.shiftKey && k === 'e') { e.preventDefault(); e.stopPropagation(); splitActive('column'); }
     else if (e.ctrlKey && e.shiftKey && k === 'w') { e.preventDefault(); e.stopPropagation(); closeActive(); }
+    else if (e.ctrlKey && e.shiftKey && k === 'k') { e.preventDefault(); e.stopPropagation(); clearActivePane(); }
     else if (e.ctrlKey && e.shiftKey && k === 'z') { e.preventDefault(); e.stopPropagation(); if (state.activePaneId) toggleZoom(state.activePaneId); }
     else if (e.ctrlKey && !e.shiftKey && k === 'z') { e.preventDefault(); e.stopPropagation(); undoClosePane(); }
     else if (e.ctrlKey && e.altKey && k === 'arrowleft') { e.preventDefault(); e.stopPropagation(); focusDirection('left'); }
