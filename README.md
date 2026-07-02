@@ -153,6 +153,14 @@ mod-term/
 
 ## Running it on your Windows PC
 
+### Quick install (recommended)
+
+Download the latest **mod-term Setup x.x.x.exe** from the [Releases](https://github.com/ToxicOrca/mod-term/releases) page and run it. That's it — no build tools or Node.js needed.
+
+> The installer is unsigned, so Windows SmartScreen may prompt you to allow it.
+
+### Building from source
+
 > **This must be run on Windows.** node-pty compiles a native binary against Windows' ConPTY; it can't run in a Linux sandbox, which is why the code here is scaffolded rather than pre-built.
 
 **Prerequisites**
@@ -233,4 +241,4 @@ npm run dist       # electron-builder -> Windows installer in dist/
 
 ## License
 
-MIT.
+[MIT](LICENSE)
