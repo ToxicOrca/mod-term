@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>mod-term</title>
+
+  <!-- xterm.js styles (shipped in the npm package) -->
+  <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Top chrome: workspace controls + theme picker -->
+  <header id="toolbar">
+    <span id="brand">mod-term</span>
+
+    <div class="toolbar-group">
+      <button id="btn-new-term" title="Add a new terminal pane (Ctrl+Shift+T)">+ Terminal</button>
+      <button id="btn-split-h" title="Split the active pane vertically (side by side)">Split &#9707;</button>
+      <button id="btn-split-v" title="Split the active pane horizontally (stacked)">Split &#9707;&#8203;⤓</button>
+      <button id="btn-close-pane" title="Close the active pane">Close pane</button>
+    </div>
+
+    <div class="toolbar-group">
+      <button id="btn-workspaces" title="Open the workspace quick-switcher (Ctrl+P)">Workspaces</button>
+      <button id="btn-save-workspace" title="Save the current arrangement as a workspace (Ctrl+S)">Save workspace</button>
+    </div>
+
+    <div class="toolbar-group toolbar-right">
+      <label for="theme-select">Theme</label>
+      <select id="theme-select"></select>
+      <button id="btn-settings" title="Settings (Ctrl+,)">Settings</button>
+    </div>
+
+    <div class="window-controls">
+      <button id="btn-minimize" title="Minimize">&#x2013;</button>
+      <button id="btn-maximize" title="Maximize">&#x25A1;</button>
+      <button id="btn-close-window" title="Close">&#x2715;</button>
+    </div>
+  </header>
+
+  <!-- The tiling area. renderer.js builds the split tree in here. -->
+  <main id="workspace-root"></main>
+
+  <!-- Workspace quick-switcher overlay (hidden until invoked) -->
+  <div id="switcher-overlay" class="overlay hidden">
+    <div class="switcher">
+      <input id="switcher-input" type="text" placeholder="Jump to a workspace…" />
+      <ul id="switcher-list"></ul>
+      <div class="switcher-hint">Enter = open &nbsp;·&nbsp; Esc = cancel</div>
+    </div>
+  </div>
+
+  <!-- xterm + addons, UMD builds that expose globals (Terminal, FitAddon, WebLinksAddon) -->
+  <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+  <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+  <script src="../../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+
+  <!-- Our renderer (ES module so it can import the layout model + submodules) -->
+  <script type="module" src="renderer.js"></script>
+</body>
+</html>

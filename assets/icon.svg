@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="80" ry="80" fill="#0d1117"/>
+
+  <!-- Bold tiling grid: vertical + horizontal dividers -->
+  <line x1="256" y1="48" x2="256" y2="250" stroke="#58a6ff" stroke-width="10" stroke-linecap="round" opacity="0.5"/>
+  <line x1="48" y1="250" x2="464" y2="250" stroke="#58a6ff" stroke-width="10" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- Terminal chevron: big, centered, unmistakable -->
+  <path d="M130 340 L230 400 L130 460" fill="none" stroke="#58a6ff" stroke-width="36" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Cursor/underscore -->
+  <line x1="270" y1="455" x2="380" y2="455" stroke="#58a6ff" stroke-width="30" stroke-linecap="round"/>
+</svg>

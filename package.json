@@ -1,0 +1,38 @@
+{
+  "name": "mod-term",
+  "version": "0.1.0",
+  "description": "A tiling terminal multiplexer for Windows — like tmux, but arrangeable, themeable, and able to pick up where you left off via saved workspaces.",
+  "main": "src/main/main.js",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "rebuild": "electron-rebuild -f -w node-pty",
+    "postinstall": "electron-rebuild -f -w node-pty",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.modterm.app",
+    "productName": "mod-term",
+    "files": [
+      "src/**/*",
+      "themes/**/*",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico"
+    }
+  },
+  "dependencies": {
+    "@xterm/xterm": "^5.5.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "node-pty": "^1.0.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-rebuild": "^3.2.9",
+    "electron-builder": "^24.13.3"
+  }
+}

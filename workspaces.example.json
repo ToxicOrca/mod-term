@@ -1,0 +1,60 @@
+{
+  "_comment": "EXAMPLE ONLY. This shows the shape of a saved workspace. At runtime mod-term writes the real file to Electron's userData dir (see README). Copy any entry into that file, or just use 'Save workspace' in the app. Each pane carries a cwd + optional startupCommand — that is how 'pick up where you left off' works: layout + folders + re-run commands.",
+  "lastWorkspace": "daily-projects",
+  "workspaces": {
+    "daily-projects": {
+      "name": "daily-projects",
+      "theme": "dark",
+      "savedAt": "2026-07-01T09:00:00.000Z",
+      "layout": {
+        "type": "split",
+        "direction": "row",
+        "sizes": [0.5, 0.5],
+        "children": [
+          {
+            "type": "split",
+            "direction": "column",
+            "sizes": [0.5, 0.5],
+            "children": [
+              {
+                "type": "pane",
+                "id": "pane-web",
+                "title": "web · dev server",
+                "cwd": "C:\\Projects\\web-app",
+                "startupCommand": "npm run dev"
+              },
+              {
+                "type": "pane",
+                "id": "pane-web-claude",
+                "title": "web · claude",
+                "cwd": "C:\\Projects\\web-app",
+                "startupCommand": "claude"
+              }
+            ]
+          },
+          {
+            "type": "split",
+            "direction": "column",
+            "sizes": [0.6, 0.4],
+            "children": [
+              {
+                "type": "pane",
+                "id": "pane-api",
+                "title": "api · server",
+                "cwd": "C:\\Projects\\api",
+                "startupCommand": "npm start"
+              },
+              {
+                "type": "pane",
+                "id": "pane-scratch",
+                "title": "scratch",
+                "cwd": "C:\\Projects",
+                "startupCommand": null
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

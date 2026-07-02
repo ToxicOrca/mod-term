@@ -1,0 +1,420 @@
+/* =============================================================================
+   mod-term — base UI styles
+   Colors here are DEFAULTS. The active theme overrides them at runtime by
+   setting CSS custom properties on :root (see theme.js). Dark-first: the
+   fallbacks below are the dark palette so there is never a white flash.
+   ============================================================================= */
+
+:root {
+  --app-bg: #0d1117;
+  --chrome-bg: #161b22;
+  --chrome-text: #c9d1d9;
+  --chrome-text-muted: rgba(201, 209, 217, 0.5);
+  --accent: #58a6ff;
+  --pane-border: #30363d;
+  --pane-border-active: #58a6ff;
+  --splitter-hover: #58a6ff;
+  --font-family: "Cascadia Code", Consolas, "Courier New", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--app-bg);
+  color: var(--chrome-text);
+  font-family: system-ui, "Segoe UI", sans-serif;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Toolbar (doubles as frameless title bar) ----------------------------- */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 12px;
+  height: 38px;
+  background: var(--app-bg);
+  border: none;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+#brand {
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--accent);
+  letter-spacing: 0.5px;
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  -webkit-app-region: no-drag;
+}
+
+.toolbar-right { margin-left: auto; }
+
+#toolbar button,
+#toolbar select {
+  background: transparent;
+  color: var(--chrome-text-muted);
+  border: none;
+  border-radius: 5px;
+  padding: 4px 9px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.1s, background 0.1s;
+}
+
+#toolbar button:hover {
+  color: var(--chrome-text);
+  background: rgba(255, 255, 255, 0.06);
+}
+#toolbar select:hover {
+  color: var(--chrome-text);
+}
+
+/* Dark dropdown options. */
+#toolbar select option {
+  background: var(--chrome-bg);
+  color: var(--chrome-text);
+}
+
+#toolbar label { font-size: 11px; color: var(--chrome-text-muted); }
+
+/* Window controls for frameless mode. */
+.window-controls {
+  display: flex;
+  -webkit-app-region: no-drag;
+  margin-left: 8px;
+}
+.window-controls button {
+  width: 36px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 0;
+}
+.window-controls button:last-child:hover {
+  background: #e81123;
+  color: #fff;
+}
+
+/* ---- Tiling area --------------------------------------------------------- */
+#workspace-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+
+#workspace-root > .root-node {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.split {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.split.row { flex-direction: row; }
+.split.column { flex-direction: column; }
+
+/* ---- Pane ---------------------------------------------------------------- */
+.pane {
+  position: relative;
+  min-width: 60px;
+  min-height: 40px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+.pane.active {
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.pane-header {
+  font-size: 12px;
+  padding: 3px 10px;
+  background: var(--chrome-bg);
+  color: var(--chrome-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: grab;
+}
+
+.pane-title {
+  cursor: default;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Header button group (history toggle, gear, etc.) */
+.pane-header-btns {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.pane-header-btn {
+  background: none;
+  border: none;
+  color: var(--chrome-text);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 3px;
+  opacity: 0.35;
+  transition: opacity 0.12s;
+  flex-shrink: 0;
+}
+.pane-header-btn:hover { opacity: 1; }
+
+/* Activity indicator: accent dot on the header when a background pane gets output. */
+.pane-header.has-activity .pane-title::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.pane-header .meta {
+  font-size: 10px;
+  opacity: 0.35;
+  flex-shrink: 0;
+}
+
+/* Scrollback panel: previous session output shown above the live terminal. */
+.scrollback-panel {
+  max-height: 40%;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.scrollback-label {
+  font-size: 10px;
+  padding: 3px 10px;
+  color: var(--chrome-text);
+  opacity: 0.4;
+  font-style: italic;
+}
+.scrollback-content {
+  margin: 0;
+  padding: 0 10px 6px;
+  font-family: var(--font-family);
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--chrome-text);
+  opacity: 0.35;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+/* Dark scrollbar inside scrollback panel */
+.scrollback-panel::-webkit-scrollbar { width: 6px; }
+.scrollback-panel::-webkit-scrollbar-track { background: transparent; }
+.scrollback-panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+.pane-term {
+  flex: 1;
+  min-height: 0;
+  padding: 4px;
+}
+
+/* Splitter handle between siblings. */
+.splitter {
+  flex: 0 0 4px;
+  background: transparent;
+  z-index: 2;
+}
+.split.row > .splitter { cursor: col-resize; }
+.split.column > .splitter { cursor: row-resize; }
+.splitter:hover { background: var(--accent); opacity: 0.5; }
+
+/* ---- Workspace quick-switcher ------------------------------------------- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+.overlay.hidden { display: none; }
+
+.switcher {
+  width: 460px;
+  background: var(--chrome-bg);
+  border: 1px solid var(--pane-border);
+  border-radius: 10px;
+  padding: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+}
+#switcher-input {
+  width: 100%;
+  background: var(--app-bg);
+  color: var(--chrome-text);
+  border: 1px solid var(--pane-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  outline: none;
+}
+#switcher-list { list-style: none; margin: 8px 0 0; padding: 0; max-height: 40vh; overflow-y: auto; }
+#switcher-list li {
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+}
+#switcher-list li.selected,
+#switcher-list li:hover { background: rgba(255, 255, 255, 0.06); }
+#switcher-list li .meta { opacity: 0.6; font-size: 12px; }
+.switcher-hint { margin-top: 8px; font-size: 11px; opacity: 0.5; text-align: right; }
+
+/* ---- Drag-to-split drop indicator --------------------------------------- */
+.drop-indicator {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: rgba(88, 166, 255, 0.12);
+  border: 2px dashed var(--accent);
+  z-index: 5;
+  transition: all 0.06s ease;
+}
+.drop-indicator[data-zone="left"]   { right: 50%; }
+.drop-indicator[data-zone="right"]  { left: 50%; }
+.drop-indicator[data-zone="top"]    { bottom: 50%; }
+.drop-indicator[data-zone="bottom"] { top: 50%; }
+
+.pane-header:active { cursor: grabbing; }
+
+/* Inline rename input. */
+.pane-rename-input {
+  background: var(--app-bg);
+  color: var(--chrome-text);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 0 4px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  width: 100%;
+  min-width: 60px;
+}
+
+/* Drag overlay — intercepts events over xterm. */
+.drag-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: transparent;
+}
+
+/* ---- Dark scrollbar for xterm --------------------------------------------- */
+.xterm .xterm-viewport::-webkit-scrollbar { width: 8px; }
+.xterm .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+.xterm .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+}
+.xterm .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* ---- Zoom / maximize ----------------------------------------------------- */
+#workspace-root.has-zoom .pane:not(.zoomed) { display: none; }
+#workspace-root.has-zoom .split { position: static; }
+#workspace-root.has-zoom .pane.zoomed {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+}
+
+/* ---- Modal dialogs (dialogs.js) ----------------------------------------- */
+#dialog-host .overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14vh;
+  z-index: 50;
+}
+.modal {
+  width: 440px;
+  max-width: 90vw;
+  background: var(--chrome-bg);
+  border: 1px solid var(--pane-border);
+  border-radius: 10px;
+  padding: 16px 18px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+  color: var(--chrome-text);
+}
+.modal-title { font-size: 15px; font-weight: 600; color: var(--accent); margin-bottom: 10px; }
+.modal-body { font-size: 13px; }
+.modal-message { white-space: pre-wrap; line-height: 1.5; margin: 0 0 4px; }
+.modal-label { display: block; font-size: 12px; opacity: 0.85; margin: 10px 0 4px; }
+.modal-field { margin-bottom: 6px; }
+.modal-hint { font-size: 11px; opacity: 0.55; margin-top: 3px; }
+.modal-check { display: flex; align-items: center; gap: 6px; margin-top: 10px; cursor: pointer; }
+.modal input[type="text"],
+.modal input[type="number"],
+.modal select {
+  width: 100%;
+  background: var(--app-bg);
+  color: var(--chrome-text);
+  border: 1px solid var(--pane-border);
+  border-radius: 6px;
+  padding: 7px 9px;
+  font-size: 13px;
+  outline: none;
+}
+.modal input:focus, .modal select:focus { border-color: var(--accent); }
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.modal-actions button {
+  background: transparent;
+  color: var(--chrome-text);
+  border: 1px solid var(--pane-border);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.modal-actions button:hover { border-color: var(--accent); }
+.modal-actions button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0d1117;
+  font-weight: 600;
+}

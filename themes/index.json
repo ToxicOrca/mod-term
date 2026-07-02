@@ -1,0 +1,14 @@
+{
+  "_comment": "List every theme file here. Adding a theme = drop a JSON file in this folder and add its filename here. The renderer fetches these at startup. Dark is the default.",
+  "default": "dark",
+  "themes": [
+    "dark.json",
+    "one-dark.json",
+    "dracula.json",
+    "tokyo-night.json",
+    "catppuccin-mocha.json",
+    "nord.json",
+    "gruvbox-dark.json",
+    "synthwave.json"
+  ]
+}

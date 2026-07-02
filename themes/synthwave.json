@@ -1,0 +1,41 @@
+{
+  "name": "synthwave",
+  "label": "Synthwave '84",
+  "font": {
+    "family": "Cascadia Code, Consolas, 'Courier New', monospace",
+    "size": 14,
+    "lineHeight": 1.2
+  },
+  "ui": {
+    "appBackground": "#262335",
+    "chromeBackground": "#1e1a2b",
+    "chromeText": "#bbbbbb",
+    "accent": "#ff7edb",
+    "paneBorder": "#34294f",
+    "paneBorderActive": "#ff7edb",
+    "splitterHover": "#ff7edb"
+  },
+  "terminal": {
+    "background": "#262335",
+    "foreground": "#bbbbbb",
+    "cursor": "#ff7edb",
+    "cursorAccent": "#262335",
+    "selectionBackground": "#463465",
+    "black": "#1e1a2b",
+    "red": "#fe4450",
+    "green": "#72f1b8",
+    "yellow": "#fede5d",
+    "blue": "#36f9f6",
+    "magenta": "#ff7edb",
+    "cyan": "#36f9f6",
+    "white": "#f0eff1",
+    "brightBlack": "#495495",
+    "brightRed": "#fe4450",
+    "brightGreen": "#72f1b8",
+    "brightYellow": "#f3e70f",
+    "brightBlue": "#36f9f6",
+    "brightMagenta": "#ff7edb",
+    "brightCyan": "#36f9f6",
+    "brightWhite": "#ffffff"
+  }
+}
