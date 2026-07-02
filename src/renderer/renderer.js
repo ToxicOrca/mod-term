@@ -299,11 +299,6 @@ async function buildPane(node) {
 
   header.appendChild(btnGroup);
 
-  const metaSpan = document.createElement('span');
-  metaSpan.className = 'meta';
-  metaSpan.textContent = node.id.slice(-4);
-  header.appendChild(metaSpan);
-
   paneEl.appendChild(header);
 
   // Scrollback panel: shown by default on restore unless previously dismissed.
@@ -1114,10 +1109,10 @@ async function openSwitcher() {
     if (ws) await openWorkspace(ws);
   }
   function onKey(e) {
-    if (e.key === 'Escape') return closeSwitcher();
-    if (e.key === 'ArrowDown') { selected = Math.min(selected + 1, filtered.length - 1); return render(); }
-    if (e.key === 'ArrowUp') { selected = Math.max(selected - 1, 0); return render(); }
-    if (e.key === 'Enter' && filtered[selected]) return choose(filtered[selected].name);
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); return closeSwitcher(); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); selected = Math.min(selected + 1, filtered.length - 1); return render(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); selected = Math.max(selected - 1, 0); return render(); }
+    if (e.key === 'Enter' && filtered[selected]) { e.preventDefault(); return choose(filtered[selected].name); }
   }
   function onInput() {
     const q = input.value.toLowerCase();
@@ -1127,7 +1122,8 @@ async function openSwitcher() {
   }
   function closeSwitcher() {
     overlay.classList.add('hidden');
-    input.removeEventListener('keydown', onKey);
+    // Use capture:true to match how they were added.
+    document.removeEventListener('keydown', onKey, true);
     input.removeEventListener('input', onInput);
     overlay.removeEventListener('mousedown', onBackdrop);
   }
@@ -1135,7 +1131,8 @@ async function openSwitcher() {
 
   overlay.classList.remove('hidden');
   input.value = '';
-  input.addEventListener('keydown', onKey);
+  // Listen on document in capture phase so we get Esc before xterm does.
+  document.addEventListener('keydown', onKey, true);
   input.addEventListener('input', onInput);
   overlay.addEventListener('mousedown', onBackdrop);
   render();
@@ -1162,22 +1159,25 @@ function wireToolbar() {
 }
 
 function wireShortcuts() {
+  // Use the CAPTURE phase so our shortcuts fire before xterm's internal
+  // key handler. Without this, xterm intercepts keys like Ctrl+Z and sends
+  // them to the shell (producing a beep) before we can preventDefault.
   window.addEventListener('keydown', (e) => {
     const k = e.key.toLowerCase();
-    if (e.ctrlKey && e.shiftKey && k === 't') { e.preventDefault(); addTerminal(); }
-    else if (e.ctrlKey && e.shiftKey && k === 'd') { e.preventDefault(); splitActive('row'); }
-    else if (e.ctrlKey && e.shiftKey && k === 'e') { e.preventDefault(); splitActive('column'); }
-    else if (e.ctrlKey && e.shiftKey && k === 'w') { e.preventDefault(); closeActive(); }
-    else if (e.ctrlKey && e.shiftKey && k === 'z') { e.preventDefault(); if (state.activePaneId) toggleZoom(state.activePaneId); }
-    else if (e.ctrlKey && k === 'z' && !e.shiftKey) { e.preventDefault(); undoClosePane(); }
-    else if (e.ctrlKey && e.altKey && k === 'arrowleft') { e.preventDefault(); focusDirection('left'); }
-    else if (e.ctrlKey && e.altKey && k === 'arrowright') { e.preventDefault(); focusDirection('right'); }
-    else if (e.ctrlKey && e.altKey && k === 'arrowup') { e.preventDefault(); focusDirection('up'); }
-    else if (e.ctrlKey && e.altKey && k === 'arrowdown') { e.preventDefault(); focusDirection('down'); }
-    else if (e.ctrlKey && k === 'p') { e.preventDefault(); openSwitcher(); }
-    else if (e.ctrlKey && k === 's') { e.preventDefault(); saveCurrentWorkspace(); }
-    else if (e.ctrlKey && e.key === ',') { e.preventDefault(); openSettings(); }
-  });
+    if (e.ctrlKey && e.shiftKey && k === 't') { e.preventDefault(); e.stopPropagation(); addTerminal(); }
+    else if (e.ctrlKey && e.shiftKey && k === 'd') { e.preventDefault(); e.stopPropagation(); splitActive('row'); }
+    else if (e.ctrlKey && e.shiftKey && k === 'e') { e.preventDefault(); e.stopPropagation(); splitActive('column'); }
+    else if (e.ctrlKey && e.shiftKey && k === 'w') { e.preventDefault(); e.stopPropagation(); closeActive(); }
+    else if (e.ctrlKey && e.shiftKey && k === 'z') { e.preventDefault(); e.stopPropagation(); if (state.activePaneId) toggleZoom(state.activePaneId); }
+    else if (e.ctrlKey && !e.shiftKey && k === 'z') { e.preventDefault(); e.stopPropagation(); undoClosePane(); }
+    else if (e.ctrlKey && e.altKey && k === 'arrowleft') { e.preventDefault(); e.stopPropagation(); focusDirection('left'); }
+    else if (e.ctrlKey && e.altKey && k === 'arrowright') { e.preventDefault(); e.stopPropagation(); focusDirection('right'); }
+    else if (e.ctrlKey && e.altKey && k === 'arrowup') { e.preventDefault(); e.stopPropagation(); focusDirection('up'); }
+    else if (e.ctrlKey && e.altKey && k === 'arrowdown') { e.preventDefault(); e.stopPropagation(); focusDirection('down'); }
+    else if (e.ctrlKey && k === 'p') { e.preventDefault(); e.stopPropagation(); openSwitcher(); }
+    else if (e.ctrlKey && k === 's') { e.preventDefault(); e.stopPropagation(); saveCurrentWorkspace(); }
+    else if (e.ctrlKey && e.key === ',') { e.preventDefault(); e.stopPropagation(); openSettings(); }
+  }, true); // true = capture phase
 
   window.addEventListener('resize', () => {
     for (const pane of state.panes.values()) pane.fit();

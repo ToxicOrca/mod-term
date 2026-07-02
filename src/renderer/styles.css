@@ -267,6 +267,7 @@ body {
   align-items: flex-start;
   justify-content: center;
   padding-top: 12vh;
+  z-index: 40;
 }
 .overlay.hidden { display: none; }
 
