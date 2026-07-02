@@ -44,6 +44,12 @@ const closedPaneStack = [];
 // ---- Boot -------------------------------------------------------------------
 async function boot() {
   state.settings = await window.modterm.getSettings();
+
+  // Show version next to brand.
+  const ver = await window.modterm.getVersion();
+  const verEl = document.getElementById('version');
+  if (verEl && ver) verEl.textContent = 'v' + ver;
+
   await Theme.loadThemes();
   populateThemePicker();
 
@@ -164,6 +170,15 @@ async function renderLayout() {
       if (!validIds.has(id)) {
         pane.dispose();
         state.panes.delete(id);
+      }
+    }
+
+    // Detach all live xterm elements BEFORE clearing the DOM. This prevents
+    // xterm from seeing a removal (which triggers internal re-renders that
+    // duplicate viewport content when the element is reattached).
+    for (const pane of state.panes.values()) {
+      if (pane.term && pane.term.element && pane.term.element.parentNode) {
+        pane.term.element.parentNode.removeChild(pane.term.element);
       }
     }
 

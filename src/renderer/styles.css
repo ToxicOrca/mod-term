@@ -52,6 +52,11 @@ body {
   color: var(--accent);
   letter-spacing: 0.5px;
 }
+#version {
+  font-size: 10px;
+  color: var(--chrome-text-muted);
+  margin-left: 6px;
+}
 
 .toolbar-group {
   display: flex;

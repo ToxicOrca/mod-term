@@ -45,6 +45,9 @@ contextBridge.exposeInMainWorld('modterm', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   updateSettings: (patch) => ipcRenderer.invoke('settings:update', patch),
 
+  // ---- App info ----------------------------------------------------------
+  getVersion: () => ipcRenderer.invoke('app:version'),
+
   // ---- Window controls (frameless) --------------------------------------
   minimizeWindow: () => ipcRenderer.send('window:minimize'),
   maximizeWindow: () => ipcRenderer.send('window:maximize'),
