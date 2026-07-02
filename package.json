@@ -1,6 +1,6 @@
 {
   "name": "mod-term",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A tiling terminal multiplexer for Windows — like tmux, but arrangeable, themeable, and able to pick up where you left off via saved workspaces.",
   "main": "src/main/main.js",
   "author": "",

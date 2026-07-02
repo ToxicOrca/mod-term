@@ -24,10 +24,10 @@ jobs:
       - name: Build installer
         run: npm run dist
 
-      - name: Upload release assets
+      - name: Create release and upload installer
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/*.exe
+          files: dist/*.exe
+          generate_release_notes: true
           draft: false
           prerelease: false
