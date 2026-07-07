@@ -13,7 +13,7 @@
 //   <-> xterm.js (renderer).
 // =============================================================================
 
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -135,6 +135,25 @@ function defaultShell() {
 let mainWindow = null;
 
 function createWindow() {
+  // Frameless windows lose the default Electron menu, which provides the OS-
+  // level clipboard accelerators (Ctrl+C/V/X). Without an Edit menu that has
+  // the 'paste'/'copy'/'cut' roles, keyboard paste silently does nothing.
+  // Setting a hidden menu restores clipboard shortcuts without showing a bar.
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'selectAll' },
+      ],
+    },
+  ]));
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,

@@ -379,6 +379,20 @@ async function buildPane(node) {
   state.panes.set(node.id, pane);
   state.paneEls.set(node.id, paneEl);
   await pane.attach(termEl);
+
+  // Right-click on the terminal: copy selection if any, otherwise paste.
+  // Mirrors PowerShell / Windows Terminal right-click behavior.
+  termEl.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    if (pane.term.hasSelection()) {
+      navigator.clipboard.writeText(pane.term.getSelection()).catch(() => {});
+      pane.term.clearSelection();
+    } else {
+      navigator.clipboard.readText().then((text) => {
+        if (text) pane.term.paste(text);
+      }).catch(() => {});
+    }
+  });
   applyFontOverrideTo(pane);
 
   return paneEl;
@@ -1213,6 +1227,37 @@ function wireShortcuts() {
     else if (e.ctrlKey && k === 'p') { e.preventDefault(); e.stopPropagation(); openSwitcher(); }
     else if (e.ctrlKey && k === 's') { e.preventDefault(); e.stopPropagation(); saveCurrentWorkspace(); }
     else if (e.ctrlKey && e.key === ',') { e.preventDefault(); e.stopPropagation(); openSettings(); }
+    else if (e.ctrlKey && !e.shiftKey && k === 'c') {
+      // Copy selected text. If nothing is selected, let Ctrl+C pass through
+      // to the shell as an interrupt (SIGINT).
+      const pane = state.panes.get(state.activePaneId);
+      if (pane && pane.term.hasSelection()) {
+        e.preventDefault(); e.stopPropagation();
+        navigator.clipboard.writeText(pane.term.getSelection()).catch(() => {});
+        pane.term.clearSelection();
+      }
+    }
+    else if (e.ctrlKey && !e.shiftKey && k === 'v') {
+      // Paste from clipboard into the active terminal. Electron frameless
+      // windows lack the default Edit menu that wires up OS clipboard
+      // accelerators, so Ctrl+V won't fire a paste event on its own.
+      e.preventDefault(); e.stopPropagation();
+      const pane = state.panes.get(state.activePaneId);
+      if (pane) {
+        navigator.clipboard.readText().then((text) => {
+          if (text) pane.term.paste(text);
+        }).catch(() => {});
+      }
+    }
+    else if (e.ctrlKey && e.shiftKey && k === 'v') {
+      e.preventDefault(); e.stopPropagation();
+      const pane = state.panes.get(state.activePaneId);
+      if (pane) {
+        navigator.clipboard.readText().then((text) => {
+          if (text) pane.term.paste(text);
+        }).catch(() => {});
+      }
+    }
   }, true); // true = capture phase
 
   window.addEventListener('resize', () => {
