@@ -62,7 +62,10 @@ function list() {
     .filter((w) => !w.name.startsWith('__'))
     .map((w) => ({
       name: w.name,
-      paneCount: countPanes(w.layout),
+      paneCount: Array.isArray(w.tabs)
+        ? w.tabs.reduce((s, t) => s + countPanes(t.layout), 0)
+        : countPanes(w.layout),
+      tabCount: Array.isArray(w.tabs) ? w.tabs.length : 1,
       theme: w.theme || 'dark',
     }));
 }
@@ -72,18 +75,27 @@ function load(name) {
   return store.workspaces[name] || null;
 }
 
-// ws must include at least { name, layout }. theme optional.
+// ws must include at least { name } plus either tabs[] (current format) or
+// layout (legacy single-tree format). theme optional.
 function save(ws) {
   if (!ws || !ws.name) throw new Error('workspace requires a name');
   const store = readStore();
-  store.workspaces[ws.name] = {
+  const entry = {
     name: ws.name,
     theme: ws.theme || 'dark',
-    layout: ws.layout,
-    activePaneId: ws.activePaneId || null,
-    zoomedPaneId: ws.zoomedPaneId || null,
     savedAt: new Date().toISOString(),
   };
+  if (Array.isArray(ws.tabs)) {
+    // Current format: one layout tree per tab.
+    entry.tabs = ws.tabs;
+    entry.activeTabIndex = ws.activeTabIndex || 0;
+  } else {
+    // Legacy format (kept so old renderer versions round-trip cleanly).
+    entry.layout = ws.layout;
+    entry.activePaneId = ws.activePaneId || null;
+    entry.zoomedPaneId = ws.zoomedPaneId || null;
+  }
+  store.workspaces[ws.name] = entry;
   writeStore(store);
   return true;
 }

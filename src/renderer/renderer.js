@@ -21,17 +21,61 @@ import * as Theme from './theme.js';
 import * as Dialogs from './dialogs.js';
 
 // ---- App state --------------------------------------------------------------
+// Tabs sit above the split tree: each tab owns its own layout (a full tiling
+// tree), active pane, and zoom state — tmux "windows" on top of our "panes".
+// Shells in background tabs stay alive; switching tabs just swaps which tree
+// is rendered. `state.layout` / `state.activePaneId` / `state.zoomedPaneId`
+// are getter/setter aliases for the ACTIVE tab's fields, so the whole layout
+// engine below works on "the current tab" without knowing tabs exist.
 const state = {
-  layout: null,                 // root node of the tiling tree
-  panes: new Map(),             // paneId -> TerminalPane
+  tabs: [],                     // [{ id, name|null, layout, activePaneId, zoomedPaneId }]
+  activeTabId: null,
+  panes: new Map(),             // paneId -> TerminalPane (across ALL tabs)
   paneEls: new Map(),           // paneId -> the .pane DOM element (cached to avoid xterm re-render)
-  activePaneId: null,
   activeThemeName: 'dark',
   currentWorkspaceName: null,
-  zoomedPaneId: null,           // when set, that pane is maximized
   settings: null,               // app settings (from main)
   rendering: false,             // guard against concurrent renders
+  renderQueued: false,
 };
+
+let tabCounter = 0;
+function makeTab(layout, name) {
+  tabCounter += 1;
+  return {
+    id: `tab-${Date.now().toString(36)}-${tabCounter}`,
+    name: name || null,         // null => positional label ("Tab 2")
+    layout: layout || null,
+    activePaneId: null,
+    zoomedPaneId: null,
+  };
+}
+function activeTab() {
+  return state.tabs.find((t) => t.id === state.activeTabId) || null;
+}
+function tabDisplayName(tab) {
+  const idx = state.tabs.indexOf(tab);
+  return tab.name || `Tab ${idx + 1}`;
+}
+// Which tab owns a pane id (searches every tab's tree).
+function tabForPane(paneId) {
+  return state.tabs.find((t) => findPane(t.layout, paneId)) || null;
+}
+
+Object.defineProperties(state, {
+  layout: {
+    get() { const t = activeTab(); return t ? t.layout : null; },
+    set(v) { const t = activeTab(); if (t) t.layout = v; },
+  },
+  activePaneId: {
+    get() { const t = activeTab(); return t ? t.activePaneId : null; },
+    set(v) { const t = activeTab(); if (t) t.activePaneId = v; },
+  },
+  zoomedPaneId: {
+    get() { const t = activeTab(); return t ? t.zoomedPaneId : null; },
+    set(v) { const t = activeTab(); if (t) t.zoomedPaneId = v; },
+  },
+});
 
 const rootEl = document.getElementById('workspace-root');
 
@@ -70,14 +114,18 @@ async function boot() {
   // "Pick up where you left off."
   const last = await window.modterm.getLastWorkspace();
   const restoreMode = state.settings.restoreOnLaunch || 'ask';
-  if (last && last.layout && restoreMode !== 'never') {
+  // New saves carry `tabs`; pre-tabs saves carry a top-level `layout`.
+  if (last && (last.tabs || last.layout) && restoreMode !== 'never') {
     if (restoreMode === 'auto') {
       await openWorkspace(last);
       return;
     }
     // restoreMode === 'ask'
+    // Internal names (__autosave) get a friendly label in the prompt.
+    const displayName = last.name.startsWith('__')
+      ? 'your last session' : `\u201c${last.name}\u201d`;
     const result = await Dialogs.confirmWithRemember({
-      title: `Restore \u201c${last.name}\u201d?`,
+      title: `Restore ${displayName}?`,
       message:
         'Reopen this workspace\u2019s pane layout, cd each pane into its saved ' +
         'folder, and re-run any startup commands?\n\n' +
@@ -93,8 +141,10 @@ async function boot() {
     if (result.confirmed) { await openWorkspace(last); return; }
   }
 
-  // Fresh start: the 2-pane demo that proves the tiling concept.
-  state.layout = demoLayout();
+  // Fresh start: one tab holding the 2-pane demo that proves the tiling concept.
+  const tab = makeTab(demoLayout());
+  state.tabs = [tab];
+  state.activeTabId = tab.id;
   await renderLayout();
 }
 
@@ -141,9 +191,10 @@ function sanitizeLayout(node) {
   return { type: 'split', direction: dir, children: kids, sizes };
 }
 
-// If no active pane or the active pane doesn't exist, pick the first one.
+// If no active pane or the active pane isn't in the active tab's tree,
+// pick the first one in that tree.
 function ensureActivePane() {
-  if (state.activePaneId && state.panes.has(state.activePaneId)) return;
+  if (state.activePaneId && findPane(state.layout, state.activePaneId)) return;
   const first = firstPaneId(state.layout);
   if (first) state.activePaneId = first;
 }
@@ -154,19 +205,26 @@ function ensureActivePane() {
 // Rebuild the DOM from the layout tree. Existing TerminalPane instances (keyed
 // by pane id) are reused so xterm buffers + live shells survive a re-render.
 async function renderLayout() {
-  // Prevent concurrent renders from stomping on each other.
-  if (state.rendering) return;
+  // Prevent concurrent renders from stomping on each other. Don't just drop
+  // the request though — a layout mutation may have happened mid-render, so
+  // queue one follow-up render to pick up the latest tree.
+  if (state.rendering) { state.renderQueued = true; return; }
   state.rendering = true;
 
   try {
-    // Validate the layout before rendering.
+    // Validate the active tab's layout before rendering.
     state.layout = sanitizeLayout(state.layout);
 
-    // Collect pane ids that should exist in the new layout.
+    // Collect pane ids that should exist ANYWHERE (all tabs) — panes in
+    // background tabs keep their live shells and must not be disposed.
     const validIds = new Set();
-    collectPaneIds(state.layout, validIds);
+    for (const t of state.tabs) collectPaneIds(t.layout, validIds);
 
-    // Dispose panes that are no longer in the layout (orphaned by mutations).
+    // Pane ids visible in the active tab (drives zoom checks below).
+    const activeIds = new Set();
+    collectPaneIds(state.layout, activeIds);
+
+    // Dispose panes that are no longer in any tab (orphaned by mutations).
     for (const [id, pane] of state.panes) {
       if (!validIds.has(id)) {
         pane.dispose();
@@ -187,24 +245,32 @@ async function renderLayout() {
     el.classList.add('root-node');
     rootEl.appendChild(el);
 
-    // Re-apply zoom state if a pane is maximized.
-    if (state.zoomedPaneId && !validIds.has(state.zoomedPaneId)) {
+    // Re-apply zoom state if a pane is maximized (must be in the active tab).
+    if (state.zoomedPaneId && !activeIds.has(state.zoomedPaneId)) {
       state.zoomedPaneId = null;
     }
     applyZoomClasses();
 
+    // Fit only the visible (active tab) panes — background panes are
+    // detached from the DOM and fit() would no-op/throw there anyway.
     requestAnimationFrame(() => {
-      for (const pane of state.panes.values()) pane.fit();
+      for (const id of activeIds) {
+        const pane = state.panes.get(id);
+        if (pane) pane.fit();
+      }
     });
 
     ensureActivePane();
     if (state.activePaneId) setActivePane(state.activePaneId);
+    renderTabBar();
   } catch (err) {
     console.error('[mod-term] renderLayout failed, recovering:', err);
-    // Emergency recovery: create a single fresh pane.
-    state.layout = makePane({ title: 'shell' });
-    state.activePaneId = null;
-    state.zoomedPaneId = null;
+    // Emergency recovery: one fresh tab with a single fresh pane. Rebuild the
+    // tab list too — a corrupt/empty tabs array would make the state.layout
+    // setter a silent no-op and leave us stuck.
+    const fresh = makeTab(makePane({ title: 'shell' }));
+    state.tabs = [fresh];
+    state.activeTabId = fresh.id;
     rootEl.innerHTML = '';
     try {
       const el = await buildNode(state.layout);
@@ -212,11 +278,16 @@ async function renderLayout() {
       rootEl.appendChild(el);
       ensureActivePane();
       if (state.activePaneId) setActivePane(state.activePaneId);
+      renderTabBar();
     } catch (err2) {
       console.error('[mod-term] recovery also failed:', err2);
     }
   } finally {
     state.rendering = false;
+    if (state.renderQueued) {
+      state.renderQueued = false;
+      renderLayout();
+    }
   }
 }
 
@@ -374,6 +445,13 @@ async function buildPane(node) {
           hdr.classList.add('has-activity');
         }
       }
+      // Output in a background tab: light up that tab's activity dot.
+      const owner = tabForPane(paneId);
+      if (owner && owner.id !== state.activeTabId && !owner.hasActivity) {
+        owner.hasActivity = true;
+        const tabEl = document.querySelector(`.tab[data-tab-id="${owner.id}"]`);
+        if (tabEl) tabEl.classList.add('has-activity');
+      }
     },
   });
   state.panes.set(node.id, pane);
@@ -501,11 +579,15 @@ function inheritCwd(paneId) {
 }
 
 // Remove the active pane; collapse its parent split if it drops to one child.
+// Closing the last pane of a tab closes the tab (if others exist).
 async function closeActive() {
   ensureActivePane();
   const activeId = state.activePaneId;
   if (!activeId) return;
-  if (countPanes(state.layout) <= 1) return;
+  if (countPanes(state.layout) <= 1) {
+    if (state.tabs.length > 1) await closeTab(state.activeTabId);
+    return; // last pane of the last tab — nothing to close into
+  }
 
   if (state.zoomedPaneId === activeId) state.zoomedPaneId = null;
 
@@ -628,27 +710,31 @@ function removeDragOverlays() {
 }
 
 function wireDrag(header, paneEl, node) {
-  header.addEventListener('dragstart', (e) => {
+  // Re-wiring happens on every re-render for cached panes. Remove the previous
+  // generation of listeners first, or they accumulate (one extra set per
+  // split/close/drag — a slow leak and N redundant handler runs per event).
+  if (paneEl._dragCleanup) paneEl._dragCleanup();
+
+  const onDragStart = (e) => {
     dragSourceId = node.id;
     e.dataTransfer.effectAllowed = 'move';
     setTimeout(() => addDragOverlays(node.id), 0);
-  });
-  header.addEventListener('dragend', () => {
+  };
+  const onDragEnd = () => {
     dragSourceId = null;
     removeDragOverlays();
     clearAllDropIndicators();
-  });
-
-  paneEl.addEventListener('dragover', (e) => {
+  };
+  const onDragOver = (e) => {
     if (!dragSourceId || dragSourceId === node.id) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     showDropIndicator(paneEl, zoneFor(e, paneEl.getBoundingClientRect()));
-  });
-  paneEl.addEventListener('dragleave', (e) => {
+  };
+  const onDragLeave = (e) => {
     if (!paneEl.contains(e.relatedTarget)) clearDropIndicator(paneEl);
-  });
-  paneEl.addEventListener('drop', async (e) => {
+  };
+  const onDrop = async (e) => {
     e.preventDefault();
     const srcId = dragSourceId;
     dragSourceId = null;
@@ -659,7 +745,22 @@ function wireDrag(header, paneEl, node) {
     performDrop(srcId, node.id, zone);
     await renderLayout();
     setActivePane(srcId);
-  });
+  };
+
+  header.addEventListener('dragstart', onDragStart);
+  header.addEventListener('dragend', onDragEnd);
+  paneEl.addEventListener('dragover', onDragOver);
+  paneEl.addEventListener('dragleave', onDragLeave);
+  paneEl.addEventListener('drop', onDrop);
+
+  paneEl._dragCleanup = () => {
+    header.removeEventListener('dragstart', onDragStart);
+    header.removeEventListener('dragend', onDragEnd);
+    paneEl.removeEventListener('dragover', onDragOver);
+    paneEl.removeEventListener('dragleave', onDragLeave);
+    paneEl.removeEventListener('drop', onDrop);
+    paneEl._dragCleanup = null;
+  };
 }
 
 // Execute the actual layout mutation for a drop.
@@ -748,6 +849,382 @@ function clearAllDropIndicators() {
 }
 
 // =============================================================================
+// Keyboard shortcuts reference (? button / Ctrl+Shift+/)
+// =============================================================================
+function openShortcutsHelp() {
+  Dialogs.shortcuts({
+    title: 'Keyboard shortcuts',
+    groups: [
+      { title: 'Panes', items: [
+        ['Ctrl+Shift+T', 'New terminal pane'],
+        ['Ctrl+Shift+D', 'Split side-by-side'],
+        ['Ctrl+Shift+E', 'Split stacked'],
+        ['Ctrl+Shift+W', 'Close pane (closes the tab on its last pane)'],
+        ['Ctrl+Alt+D', 'Duplicate pane (same folder, shell & command)'],
+        ['Ctrl+Shift+U', 'Undo close pane'],
+        ['Ctrl+Shift+Z', 'Zoom / maximize pane (also: double-click header)'],
+        ['Ctrl+Alt+← ↑ ↓ →', 'Move focus between panes'],
+        ['Ctrl+Shift+K', 'Clear & refresh pane'],
+        ['drag header', 'Rearrange panes · double-click title to rename'],
+      ]},
+      { title: 'Tabs', items: [
+        ['Ctrl+Shift+N', 'New tab'],
+        ['Ctrl+Tab / Ctrl+Shift+Tab', 'Next / previous tab'],
+        ['Ctrl+Shift+1…9', 'Jump to tab'],
+        ['middle-click', 'Close tab · right-click for rename/duplicate/close'],
+      ]},
+      { title: 'Terminal', items: [
+        ['Ctrl+Shift+F', 'Find (Enter next, Shift+Enter previous, Esc close)'],
+        ['Ctrl+= / Ctrl+- / Ctrl+0', 'Font bigger / smaller / reset'],
+        ['Ctrl+C', 'Copy selection (interrupt when nothing selected)'],
+        ['Ctrl+V / Ctrl+Shift+V', 'Paste'],
+        ['right-click', 'Copy selection, or paste when nothing selected'],
+      ]},
+      { title: 'Workspaces & app', items: [
+        ['Ctrl+Shift+P', 'Workspace quick-switcher'],
+        ['Ctrl+Shift+S', 'Save workspace'],
+        ['Ctrl+,', 'Settings'],
+        ['Ctrl+Shift+/', 'This list'],
+      ]},
+    ],
+  });
+}
+
+// =============================================================================
+// Find bar (search the active pane's buffer, Ctrl+Shift+F)
+// =============================================================================
+let findBarEl = null;
+
+function openFindBar() {
+  const pane = state.panes.get(state.activePaneId);
+  if (!pane || !pane.searchAddon) return;
+  if (!findBarEl) buildFindBar();
+  findBarEl.classList.remove('hidden');
+  const input = findBarEl.querySelector('input');
+  input.focus();
+  input.select();
+}
+
+function closeFindBar() {
+  if (!findBarEl) return;
+  findBarEl.classList.add('hidden');
+  const pane = state.panes.get(state.activePaneId);
+  if (pane && pane.searchAddon) {
+    try { pane.searchAddon.clearDecorations(); } catch (_) { /* older addon */ }
+  }
+  if (pane) pane.focus();
+}
+
+function buildFindBar() {
+  findBarEl = document.createElement('div');
+  findBarEl.id = 'find-bar';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'Find…';
+  findBarEl.appendChild(input);
+
+  const mkBtn = (text, title, fn) => {
+    const b = document.createElement('button');
+    b.textContent = text;
+    b.title = title;
+    b.addEventListener('click', fn);
+    findBarEl.appendChild(b);
+  };
+
+  const doFind = (backwards, incremental) => {
+    const pane = state.panes.get(state.activePaneId);
+    if (!pane || !pane.searchAddon || !input.value) return;
+    if (backwards) pane.searchAddon.findPrevious(input.value);
+    else pane.searchAddon.findNext(input.value, { incremental });
+  };
+
+  mkBtn('▲', 'Previous match (Shift+Enter)', () => doFind(true, false));
+  mkBtn('▼', 'Next match (Enter)', () => doFind(false, false));
+  mkBtn('✕', 'Close (Esc)', () => closeFindBar());
+
+  // Search as you type; Enter steps through matches.
+  input.addEventListener('input', () => doFind(false, true));
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') { e.preventDefault(); doFind(e.shiftKey, false); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeFindBar(); }
+  });
+
+  document.body.appendChild(findBarEl);
+}
+
+// =============================================================================
+// Font zoom (Ctrl+= / Ctrl+- / Ctrl+0)
+// =============================================================================
+// Adjusts the fontSize override in settings (so it persists and shows up in
+// the Settings dialog). delta 0 resets to the theme's default size.
+function zoomFont(delta) {
+  const pane = state.panes.get(state.activePaneId) || state.panes.values().next().value;
+  const current = (state.settings && state.settings.fontSize)
+    || (pane ? pane.term.options.fontSize : 14) || 14;
+  const next = delta === 0 ? null : Math.min(Math.max(current + delta, 6), 40);
+
+  window.modterm.updateSettings({ fontSize: next }).then((s) => {
+    state.settings = s;
+    for (const p of state.panes.values()) applyFontOverrideTo(p);
+    flashToolbar(next ? `Font size ${next}px` : 'Font size reset');
+  }).catch(() => {});
+}
+
+// =============================================================================
+// Duplicate pane / tab
+// =============================================================================
+
+// Clone the active pane's config (cwd, shell, startup command) into a new
+// pane beside it. The clone gets a fresh shell — output isn't copied.
+async function duplicateActivePane() {
+  ensureActivePane();
+  if (state.zoomedPaneId) return;
+  const node = findPane(state.layout, state.activePaneId);
+  if (!node) return;
+
+  const clone = makePane({
+    cwd: node.cwd,
+    shell: node.shell,
+    startupCommand: node.startupCommand,
+    title: node.title,
+    userTitle: node.userTitle,
+  });
+  state.layout = replacePane(state.layout, node.id, (n) =>
+    makeSplit('row', [n, clone], [0.5, 0.5])
+  );
+  await renderLayout();
+  setActivePane(clone.id);
+}
+
+// Remove saved-output blobs from a cloned tree — a duplicate gets fresh
+// shells, not a replay of the original's history.
+function stripScrollback(node) {
+  if (!node) return;
+  if (node.type === 'pane') {
+    delete node.scrollback;
+    delete node.scrollbackAnsi;
+    return;
+  }
+  (node.children || []).forEach(stripScrollback);
+}
+
+// Duplicate a whole tab: same layout + pane configs, fresh ids and shells.
+async function duplicateTab(tabId) {
+  const src = state.tabs.find((t) => t.id === tabId);
+  if (!src) return;
+  const { node } = reidLayout(src.layout);
+  stripScrollback(node);
+  const copy = makeTab(node, src.name ? `${src.name} copy` : null);
+  state.tabs.splice(state.tabs.indexOf(src) + 1, 0, copy);
+  state.activeTabId = copy.id;
+  await renderLayout();
+}
+
+// =============================================================================
+// Tabs
+// =============================================================================
+const tabBarEl = document.getElementById('tab-bar');
+let tabDragSourceId = null;
+// Reordering re-renders the strip mid-drag, which can remove the dragged
+// element before its own dragend fires. Clear the drag state globally so a
+// stale id can't make the next hover reorder tabs.
+document.addEventListener('dragend', () => { tabDragSourceId = null; });
+document.addEventListener('drop', () => { tabDragSourceId = null; });
+
+async function newTab() {
+  const pane = makePane({ title: 'shell', cwd: inheritCwd(state.activePaneId) });
+  const tab = makeTab(pane);
+  state.tabs.push(tab);
+  state.activeTabId = tab.id;
+  await renderLayout();
+}
+
+async function switchTab(tabId) {
+  if (tabId === state.activeTabId) return;
+  const tab = state.tabs.find((t) => t.id === tabId);
+  if (!tab) return;
+  state.activeTabId = tabId;
+  tab.hasActivity = false; // seen it — clear the activity dot
+  await renderLayout();
+}
+
+async function cycleTab(delta) {
+  if (state.tabs.length < 2) return;
+  const idx = state.tabs.findIndex((t) => t.id === state.activeTabId);
+  const next = (idx + delta + state.tabs.length) % state.tabs.length;
+  await switchTab(state.tabs[next].id);
+}
+
+// Close a tab and every shell in it. The app always keeps at least one tab —
+// closing the last one resets it to a fresh single pane.
+async function closeTab(tabId) {
+  const idx = state.tabs.findIndex((t) => t.id === tabId);
+  if (idx < 0) return;
+  const tab = state.tabs[idx];
+
+  // Dispose all panes owned by this tab.
+  const ids = new Set();
+  collectPaneIds(tab.layout, ids);
+  for (const id of ids) {
+    const pane = state.panes.get(id);
+    if (pane) { pane.dispose(); state.panes.delete(id); state.paneEls.delete(id); }
+  }
+
+  state.tabs.splice(idx, 1);
+  if (state.tabs.length === 0) {
+    const fresh = makeTab(makePane({ title: 'shell' }));
+    state.tabs.push(fresh);
+    state.activeTabId = fresh.id;
+  } else if (state.activeTabId === tabId) {
+    // Activate the neighbor that slid into this slot (or the new last tab).
+    state.activeTabId = state.tabs[Math.min(idx, state.tabs.length - 1)].id;
+  }
+  await renderLayout();
+}
+
+// Rebuild the tab strip. Cheap (a handful of small DOM nodes), called from
+// renderLayout so it always reflects the current tab list.
+function renderTabBar() {
+  if (!tabBarEl) return;
+  tabBarEl.innerHTML = '';
+
+  for (const tab of state.tabs) {
+    const el = document.createElement('div');
+    el.className = 'tab';
+    el.dataset.tabId = tab.id;
+    if (tab.id === state.activeTabId) el.classList.add('active');
+    if (tab.hasActivity) el.classList.add('has-activity');
+    el.draggable = true;
+
+    const title = document.createElement('span');
+    title.className = 'tab-title';
+    title.textContent = tabDisplayName(tab);
+    el.appendChild(title);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'tab-close';
+    closeBtn.textContent = '✕';
+    closeBtn.title = 'Close tab (and its shells)';
+    closeBtn.addEventListener('click', (e) => { e.stopPropagation(); closeTab(tab.id); });
+    el.appendChild(closeBtn);
+
+    el.addEventListener('mousedown', (e) => {
+      // Middle-click closes, like browsers / Windows Terminal.
+      if (e.button === 1) { e.preventDefault(); closeTab(tab.id); return; }
+      if (e.button === 0 && !title.querySelector('input')) switchTab(tab.id);
+    });
+    title.addEventListener('dblclick', (e) => {
+      e.stopPropagation();
+      startTabRename(tab, title);
+    });
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showTabMenu(tab, e.clientX, e.clientY);
+    });
+
+    // Drag to reorder.
+    el.addEventListener('dragstart', (e) => {
+      tabDragSourceId = tab.id;
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    el.addEventListener('dragend', () => { tabDragSourceId = null; });
+    el.addEventListener('dragover', (e) => {
+      if (!tabDragSourceId || tabDragSourceId === tab.id) return;
+      e.preventDefault();
+      const from = state.tabs.findIndex((t) => t.id === tabDragSourceId);
+      const to = state.tabs.findIndex((t) => t.id === tab.id);
+      if (from < 0 || to < 0) return;
+      const [moved] = state.tabs.splice(from, 1);
+      state.tabs.splice(to, 0, moved);
+      renderTabBar();
+    });
+
+    tabBarEl.appendChild(el);
+  }
+
+  const addBtn = document.createElement('button');
+  addBtn.id = 'tab-add';
+  addBtn.textContent = '+';
+  addBtn.title = 'New tab (Ctrl+Shift+N)';
+  addBtn.addEventListener('click', () => newTab());
+  tabBarEl.appendChild(addBtn);
+}
+
+// Small right-click menu on a tab: rename / duplicate / close.
+let tabMenuEl = null;
+function closeTabMenu() {
+  if (!tabMenuEl) return;
+  tabMenuEl.remove();
+  tabMenuEl = null;
+  document.removeEventListener('mousedown', onTabMenuAway, true);
+}
+function onTabMenuAway(e) {
+  if (tabMenuEl && !tabMenuEl.contains(e.target)) closeTabMenu();
+}
+function showTabMenu(tab, x, y) {
+  closeTabMenu();
+  tabMenuEl = document.createElement('div');
+  tabMenuEl.id = 'tab-menu';
+
+  const items = [
+    ['Rename', () => {
+      const span = document.querySelector(`.tab[data-tab-id="${tab.id}"] .tab-title`);
+      if (span) startTabRename(tab, span);
+    }],
+    ['Duplicate', () => duplicateTab(tab.id)],
+    ['Close', () => closeTab(tab.id)],
+  ];
+  for (const [label, fn] of items) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.addEventListener('click', () => { closeTabMenu(); fn(); });
+    tabMenuEl.appendChild(b);
+  }
+
+  tabMenuEl.style.left = `${x}px`;
+  tabMenuEl.style.top = `${y}px`;
+  document.body.appendChild(tabMenuEl);
+  document.addEventListener('mousedown', onTabMenuAway, true);
+}
+
+// Inline tab rename, mirroring pane rename. A user-chosen name sticks;
+// unnamed tabs show a positional "Tab N" label.
+function startTabRename(tab, titleSpan) {
+  if (titleSpan.querySelector('input')) return;
+  const currentName = tabDisplayName(tab);
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'tab-rename-input';
+  input.value = currentName;
+  titleSpan.textContent = '';
+  titleSpan.appendChild(input);
+  input.focus();
+  input.select();
+
+  function commit() {
+    const val = input.value.trim();
+    cleanup();
+    if (val) tab.name = val;
+    renderTabBar();
+  }
+  function cancel() { cleanup(); renderTabBar(); }
+  function cleanup() {
+    input.removeEventListener('blur', onBlur);
+    input.removeEventListener('keydown', onKey);
+  }
+  function onBlur() { commit(); }
+  function onKey(e) {
+    if (e.key === 'Enter') { e.preventDefault(); commit(); }
+    if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+    e.stopPropagation();
+  }
+  input.addEventListener('blur', onBlur);
+  input.addEventListener('keydown', onKey);
+}
+
+// =============================================================================
 // Focus handling + directional navigation
 // =============================================================================
 function setActivePane(id) {
@@ -766,6 +1243,9 @@ function setActivePane(id) {
 
 // Move focus to the nearest pane in a compass direction (Ctrl+Alt+Arrow).
 function focusDirection(dir) {
+  // While zoomed only one pane is visible; the others have zero-size rects
+  // and could win the distance contest. Nothing to navigate to — bail.
+  if (state.zoomedPaneId) return;
   const active = document.querySelector(`.pane[data-pane-id="${state.activePaneId}"]`);
   if (!active) return;
   const a = active.getBoundingClientRect();
@@ -888,9 +1368,9 @@ async function openPaneConfig(node) {
 
 function applyFontOverrideTo(pane) {
   const s = state.settings || {};
-  if (s.fontSize || s.fontFamily) {
-    pane.setFontOverride({ size: s.fontSize, family: s.fontFamily });
-  }
+  // Always call, even with both null — clearing the fields in Settings must
+  // reset live panes back to the theme's font.
+  pane.setFontOverride({ size: s.fontSize, family: s.fontFamily });
 }
 
 // =============================================================================
@@ -914,6 +1394,8 @@ async function openSettings() {
         hint: 'Applied now and used for new sessions.' },
       { key: 'fontSize', label: 'Terminal font size (px)', type: 'number', value: s.fontSize,
         placeholder: 'theme default', hint: 'Leave blank to use the theme\u2019s size.' },
+      { key: 'fontFamily', label: 'Terminal font family', type: 'text', value: s.fontFamily || '',
+        placeholder: 'theme default', hint: 'e.g. Cascadia Code, Consolas. Leave blank for the theme\u2019s font.' },
       { key: 'defaultShell', label: 'Default shell', type: 'select', value: s.defaultShell || '',
         options: shellOptions, hint: 'Shell used for new terminal panes.' },
       { key: 'restoreOnLaunch', label: 'On launch', type: 'select',
@@ -991,34 +1473,55 @@ function captureScrollback(paneId, maxLines) {
   }
 }
 
-// Walk the layout tree and attach scrollback arrays to pane nodes.
+// Walk the layout tree and attach scrollback to pane nodes. Preferred format
+// is `scrollbackAnsi` (a colored ANSI string from the serialize addon, later
+// replayed into the buffer on restore); plain-text `scrollback` arrays are the
+// legacy fallback shown in the history panel. If a pane has no live terminal
+// to capture from (e.g. restored but never rendered), keep whatever the node
+// already carries rather than wiping it on the next auto-save.
 function attachScrollback(node, maxLines) {
   if (!node) return node;
   if (node.type === 'pane') {
-    return { ...node, scrollback: captureScrollback(node.id, maxLines) };
+    const pane = state.panes.get(node.id);
+    const ansi = (pane && pane.serializeScrollback) ? pane.serializeScrollback(maxLines) : null;
+    if (ansi) return { ...node, scrollbackAnsi: ansi, scrollback: null };
+    return {
+      ...node,
+      scrollbackAnsi: node.scrollbackAnsi || null,
+      scrollback: captureScrollback(node.id, maxLines) || node.scrollback || null,
+    };
   }
   return { ...node, children: node.children.map((c) => attachScrollback(c, maxLines)) };
 }
 
-// Build a workspace payload from the current state.
+// Build a workspace payload from the current state. All tabs are captured.
 // includeScrollback: true for auto-save (always), controlled by setting for manual save.
 function buildWorkspaceSnapshot(name, includeScrollback) {
-  let layoutToSave = state.layout;
-  if (includeScrollback) {
-    const s = state.settings || {};
-    const maxLines = Math.min(Math.max(s.scrollbackLines || 200, 1), 1000);
-    try {
-      layoutToSave = attachScrollback(state.layout, maxLines);
-    } catch (err) {
-      console.error('[mod-term] scrollback capture failed, saving without it:', err);
+  const s = state.settings || {};
+  const maxLines = Math.min(Math.max(s.scrollbackLines || 200, 1), 1000);
+
+  const tabs = state.tabs.map((tab) => {
+    let layoutToSave = tab.layout;
+    if (includeScrollback) {
+      try {
+        layoutToSave = attachScrollback(tab.layout, maxLines);
+      } catch (err) {
+        console.error('[mod-term] scrollback capture failed, saving without it:', err);
+      }
     }
-  }
+    return {
+      name: tab.name, // null for unnamed (positional label)
+      layout: layoutToSave,
+      activePaneId: tab.activePaneId,
+      zoomedPaneId: tab.zoomedPaneId,
+    };
+  });
+
   return {
     name,
     theme: state.activeThemeName,
-    layout: layoutToSave,
-    activePaneId: state.activePaneId,
-    zoomedPaneId: state.zoomedPaneId,
+    tabs,
+    activeTabIndex: Math.max(0, state.tabs.findIndex((t) => t.id === state.activeTabId)),
   };
 }
 
@@ -1030,6 +1533,10 @@ async function saveCurrentWorkspace() {
     placeholder: 'e.g. daily-projects',
   });
   if (!name) return;
+  if (name.startsWith('__')) {
+    flashToolbar('Names starting with __ are reserved');
+    return;
+  }
 
   await window.modterm.saveWorkspace(buildWorkspaceSnapshot(name, !!state.settings.saveScrollback));
   await window.modterm.setLastWorkspace(name);
@@ -1037,14 +1544,16 @@ async function saveCurrentWorkspace() {
   flashToolbar(`Saved "${name}"`);
 }
 
-// Auto-save: persists the current state (including scrollback) so the user
-// doesn't have to manually Ctrl+S for the restore to be up-to-date.
+// Auto-save: persists the current state (including scrollback) so restore is
+// up-to-date without a manual save. ALWAYS writes to the internal __autosave
+// slot — never to a named workspace. Named workspaces are checkpoints the
+// user created deliberately; silently overwriting them every 30s would
+// destroy the saved arrangement the moment the user experiments with panes.
 async function autoSave() {
   if (!state.layout || state.panes.size === 0) return;
-  const name = state.currentWorkspaceName || '__autosave';
   try {
-    await window.modterm.saveWorkspace(buildWorkspaceSnapshot(name, true));
-    await window.modterm.setLastWorkspace(name);
+    await window.modterm.saveWorkspace(buildWorkspaceSnapshot('__autosave', true));
+    await window.modterm.setLastWorkspace('__autosave');
   } catch (err) {
     console.error('[mod-term] auto-save failed:', err);
   }
@@ -1068,8 +1577,6 @@ async function openWorkspace(ws) {
   for (const pane of state.panes.values()) pane.dispose();
   state.panes.clear();
   state.paneEls.clear();
-  state.activePaneId = null;
-  state.zoomedPaneId = null;
   dismissedScrollback.clear();
 
   // Theme is a user preference, not a per-workspace setting — don't override it.
@@ -1078,21 +1585,45 @@ async function openWorkspace(ws) {
     applyThemeByName(ws.theme, false);
   }
 
-  const { node: newLayout, idMap } = reidLayout(ws.layout);
-  state.layout = newLayout;
-  state.currentWorkspaceName = ws.name;
+  // New format: { tabs: [...], activeTabIndex }. Legacy (pre-tabs) workspaces
+  // have a single top-level { layout, activePaneId, zoomedPaneId } — wrap them
+  // in one tab so old saves keep working.
+  const savedTabs = (Array.isArray(ws.tabs) && ws.tabs.length > 0)
+    ? ws.tabs
+    : [{ name: null, layout: ws.layout, activePaneId: ws.activePaneId, zoomedPaneId: ws.zoomedPaneId }];
 
-  // Restore active/zoomed pane using the old → new ID mapping.
-  if (ws.activePaneId && idMap.has(ws.activePaneId)) {
-    state.activePaneId = idMap.get(ws.activePaneId);
+  state.tabs = savedTabs.map((st) => {
+    const { node: newLayout, idMap } = reidLayout(st.layout);
+    const tab = makeTab(newLayout, st.name || null);
+    // Restore active/zoomed pane using the old → new ID mapping.
+    if (st.activePaneId && idMap.has(st.activePaneId)) {
+      tab.activePaneId = idMap.get(st.activePaneId);
+    }
+    if (st.zoomedPaneId && idMap.has(st.zoomedPaneId)) {
+      tab.zoomedPaneId = idMap.get(st.zoomedPaneId);
+    }
+    return tab;
+  });
+  const idx = Math.min(Math.max(ws.activeTabIndex || 0, 0), state.tabs.length - 1);
+
+  // Spawn every tab's shells NOW rather than lazily on first visit — restore
+  // exists to re-run startup commands, so a `npm run dev` in a background tab
+  // must start immediately. Render each tab once (this builds panes + spawns
+  // ptys), then land on the saved active tab.
+  for (const t of state.tabs) {
+    if (t.id === state.tabs[idx].id) continue; // the active tab renders last
+    state.activeTabId = t.id;
+    await renderLayout();
   }
-  if (ws.zoomedPaneId && idMap.has(ws.zoomedPaneId)) {
-    state.zoomedPaneId = idMap.get(ws.zoomedPaneId);
-  }
+  state.activeTabId = state.tabs[idx].id;
+
+  // Internal workspaces (__autosave) are not user-named — don't adopt the
+  // name, or "Save workspace" would offer "__autosave" as the default.
+  state.currentWorkspaceName = ws.name.startsWith('__') ? null : ws.name;
 
   await window.modterm.setLastWorkspace(ws.name);
   await renderLayout();
-  flashToolbar(`Opened "${ws.name}"`);
+  flashToolbar(ws.name.startsWith('__') ? 'Restored last session' : `Opened "${ws.name}"`);
 }
 
 // Give every pane in a loaded tree a fresh id (clean pty spawn), preserving
@@ -1113,6 +1644,7 @@ function reidLayout(node, idMap) {
       userTitle: node.userTitle,
     });
     if (node.scrollback) p.scrollback = node.scrollback;
+    if (node.scrollbackAnsi) p.scrollbackAnsi = node.scrollbackAnsi;
     if (node.id) idMap.set(node.id, p.id);
     return { node: p, idMap };
   }
@@ -1140,9 +1672,31 @@ async function openSwitcher() {
     filtered.forEach((w, i) => {
       const li = document.createElement('li');
       if (i === selected) li.classList.add('selected');
+      const tabsBit = w.tabCount > 1 ? `${w.tabCount} tabs \u00b7 ` : '';
       li.innerHTML =
         `<span>${escapeHtml(w.name)}</span>` +
-        `<span class="meta">${w.paneCount} panes \u00b7 ${escapeHtml(w.theme)}</span>`;
+        `<span class="meta">${tabsBit}${w.paneCount} panes \u00b7 ${escapeHtml(w.theme)}</span>`;
+
+      // Delete button with inline two-click confirm. A nested modal is off the
+      // table here: both the switcher and dialogs use capture-phase keydown
+      // handlers, so stacking them makes Enter/Escape ambiguous.
+      const delBtn = document.createElement('button');
+      delBtn.className = 'switcher-delete';
+      delBtn.textContent = '\u2715';
+      delBtn.title = 'Delete this workspace';
+      delBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!delBtn.dataset.armed) {
+          delBtn.dataset.armed = '1';
+          delBtn.textContent = 'delete?';
+          return;
+        }
+        await window.modterm.deleteWorkspace(w.name);
+        all = await window.modterm.listWorkspaces();
+        onInput(); // re-filter + re-render with the current query
+      });
+      li.appendChild(delBtn);
+
       li.addEventListener('click', () => choose(w.name));
       listEl.appendChild(li);
     });
@@ -1200,6 +1754,8 @@ function wireToolbar() {
   document.getElementById('btn-workspaces').onclick = () => openSwitcher();
   const settingsBtn = document.getElementById('btn-settings');
   if (settingsBtn) settingsBtn.onclick = () => openSettings();
+  const helpBtn = document.getElementById('btn-help');
+  if (helpBtn) helpBtn.onclick = () => openShortcutsHelp();
 
   // Frameless window controls.
   document.getElementById('btn-minimize').onclick = () => window.modterm.minimizeWindow();
@@ -1212,6 +1768,17 @@ function wireShortcuts() {
   // key handler. Without this, xterm intercepts keys like Ctrl+Z and sends
   // them to the shell (producing a beep) before we can preventDefault.
   window.addEventListener('keydown', (e) => {
+    // Don't run app shortcuts while a modal dialog or the quick-switcher is
+    // open — they have their own key handling (Enter/Escape) and firing
+    // layout shortcuts underneath a modal is confusing.
+    if (document.querySelector('#dialog-host .overlay')) return;
+    const switcherEl = document.getElementById('switcher-overlay');
+    if (switcherEl && !switcherEl.classList.contains('hidden')) return;
+
+    // NOTE: bare Ctrl+<letter> combos are reserved for the shell (Ctrl+P is
+    // previous-command in readline/PSReadLine, Ctrl+S is XOFF/forward-search,
+    // Ctrl+Z is SIGTSTP in WSL/Git Bash). App shortcuts use Ctrl+Shift, same
+    // convention as Windows Terminal.
     const k = e.key.toLowerCase();
     if (e.ctrlKey && e.shiftKey && k === 't') { e.preventDefault(); e.stopPropagation(); addTerminal(); }
     else if (e.ctrlKey && e.shiftKey && k === 'd') { e.preventDefault(); e.stopPropagation(); splitActive('row'); }
@@ -1219,14 +1786,32 @@ function wireShortcuts() {
     else if (e.ctrlKey && e.shiftKey && k === 'w') { e.preventDefault(); e.stopPropagation(); closeActive(); }
     else if (e.ctrlKey && e.shiftKey && k === 'k') { e.preventDefault(); e.stopPropagation(); clearActivePane(); }
     else if (e.ctrlKey && e.shiftKey && k === 'z') { e.preventDefault(); e.stopPropagation(); if (state.activePaneId) toggleZoom(state.activePaneId); }
-    else if (e.ctrlKey && !e.shiftKey && k === 'z') { e.preventDefault(); e.stopPropagation(); undoClosePane(); }
+    else if (e.ctrlKey && e.shiftKey && k === 'u') { e.preventDefault(); e.stopPropagation(); undoClosePane(); }
     else if (e.ctrlKey && e.altKey && k === 'arrowleft') { e.preventDefault(); e.stopPropagation(); focusDirection('left'); }
     else if (e.ctrlKey && e.altKey && k === 'arrowright') { e.preventDefault(); e.stopPropagation(); focusDirection('right'); }
     else if (e.ctrlKey && e.altKey && k === 'arrowup') { e.preventDefault(); e.stopPropagation(); focusDirection('up'); }
     else if (e.ctrlKey && e.altKey && k === 'arrowdown') { e.preventDefault(); e.stopPropagation(); focusDirection('down'); }
-    else if (e.ctrlKey && k === 'p') { e.preventDefault(); e.stopPropagation(); openSwitcher(); }
-    else if (e.ctrlKey && k === 's') { e.preventDefault(); e.stopPropagation(); saveCurrentWorkspace(); }
+    else if (e.ctrlKey && e.shiftKey && k === 'p') { e.preventDefault(); e.stopPropagation(); openSwitcher(); }
+    else if (e.ctrlKey && e.shiftKey && k === 's') { e.preventDefault(); e.stopPropagation(); saveCurrentWorkspace(); }
+    else if (e.ctrlKey && e.shiftKey && k === 'n') { e.preventDefault(); e.stopPropagation(); newTab(); }
+    else if (e.ctrlKey && e.key === 'Tab') {
+      // Ctrl+Tab / Ctrl+Shift+Tab cycle tabs (safe: terminals don't use them).
+      e.preventDefault(); e.stopPropagation();
+      cycleTab(e.shiftKey ? -1 : 1);
+    }
+    else if (e.ctrlKey && e.shiftKey && /^Digit[1-9]$/.test(e.code)) {
+      // e.key is '!'/'@'/… when shift is held, so match on the physical key.
+      e.preventDefault(); e.stopPropagation();
+      const idx = Number(e.code.slice(5)) - 1;
+      if (state.tabs[idx]) switchTab(state.tabs[idx].id);
+    }
+    else if (e.ctrlKey && e.shiftKey && k === 'f') { e.preventDefault(); e.stopPropagation(); openFindBar(); }
+    else if (e.ctrlKey && e.altKey && k === 'd') { e.preventDefault(); e.stopPropagation(); duplicateActivePane(); }
+    else if (e.ctrlKey && (k === '=' || k === '+')) { e.preventDefault(); e.stopPropagation(); zoomFont(1); }
+    else if (e.ctrlKey && k === '-') { e.preventDefault(); e.stopPropagation(); zoomFont(-1); }
+    else if (e.ctrlKey && !e.shiftKey && k === '0') { e.preventDefault(); e.stopPropagation(); zoomFont(0); }
     else if (e.ctrlKey && e.key === ',') { e.preventDefault(); e.stopPropagation(); openSettings(); }
+    else if (e.ctrlKey && e.shiftKey && (e.key === '/' || e.key === '?')) { e.preventDefault(); e.stopPropagation(); openShortcutsHelp(); }
     else if (e.ctrlKey && !e.shiftKey && k === 'c') {
       // Copy selected text. If nothing is selected, let Ctrl+C pass through
       // to the shell as an interrupt (SIGINT).

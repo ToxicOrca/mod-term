@@ -45,16 +45,21 @@ export function applyTheme(name) {
 
   const root = document.documentElement.style;
   const ui = theme.ui || {};
-  root.setProperty('--app-bg', ui.appBackground);
-  root.setProperty('--chrome-bg', ui.chromeBackground);
-  root.setProperty('--chrome-text', ui.chromeText);
-  root.setProperty('--accent', ui.accent);
-  root.setProperty('--pane-border', ui.paneBorder);
-  root.setProperty('--pane-border-active', ui.paneBorderActive);
-  root.setProperty('--splitter-hover', ui.splitterHover);
-  if (theme.font && theme.font.family) {
-    root.setProperty('--font-family', theme.font.family);
-  }
+  // Only set variables the theme actually defines — setProperty(name,
+  // undefined) writes the literal string "undefined", which is invalid CSS
+  // and silently breaks the fallback in styles.css.
+  const setVar = (name, value) => {
+    if (value != null) root.setProperty(name, value);
+    else root.removeProperty(name); // fall back to the styles.css default
+  };
+  setVar('--app-bg', ui.appBackground);
+  setVar('--chrome-bg', ui.chromeBackground);
+  setVar('--chrome-text', ui.chromeText);
+  setVar('--accent', ui.accent);
+  setVar('--pane-border', ui.paneBorder);
+  setVar('--pane-border-active', ui.paneBorderActive);
+  setVar('--splitter-hover', ui.splitterHover);
+  setVar('--font-family', theme.font && theme.font.family);
   return theme;
 }
 

@@ -23,14 +23,15 @@
     </div>
 
     <div class="toolbar-group">
-      <button id="btn-workspaces" title="Open the workspace quick-switcher (Ctrl+P)">Workspaces</button>
-      <button id="btn-save-workspace" title="Save the current arrangement as a workspace (Ctrl+S)">Save workspace</button>
+      <button id="btn-workspaces" title="Open the workspace quick-switcher (Ctrl+Shift+P)">Workspaces</button>
+      <button id="btn-save-workspace" title="Save the current arrangement as a workspace (Ctrl+Shift+S)">Save workspace</button>
     </div>
 
     <div class="toolbar-group toolbar-right">
       <label for="theme-select">Theme</label>
       <select id="theme-select"></select>
       <button id="btn-settings" title="Settings (Ctrl+,)">Settings</button>
+      <button id="btn-help" title="Keyboard shortcuts (Ctrl+Shift+/)">?</button>
     </div>
 
     <div class="window-controls">
@@ -40,7 +41,10 @@
     </div>
   </header>
 
-  <!-- The tiling area. renderer.js builds the split tree in here. -->
+  <!-- Tab strip: one tab per layout tree. renderer.js renders into this. -->
+  <nav id="tab-bar"></nav>
+
+  <!-- The tiling area. renderer.js builds the active tab's split tree in here. -->
   <main id="workspace-root"></main>
 
   <!-- Workspace quick-switcher overlay (hidden until invoked) -->
@@ -56,6 +60,9 @@
   <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
   <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
   <script src="../../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+  <script src="../../node_modules/@xterm/addon-search/lib/addon-search.js"></script>
+  <script src="../../node_modules/@xterm/addon-serialize/lib/addon-serialize.js"></script>
+  <script src="../../node_modules/@xterm/addon-webgl/lib/addon-webgl.js"></script>
 
   <!-- Our renderer (ES module so it can import the layout model + submodules) -->
   <script type="module" src="renderer.js"></script>

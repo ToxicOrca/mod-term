@@ -68,6 +68,9 @@ So for *this* app specifically, Electron is the pragmatic pick. (If mod-term lat
 ### 1. Tiling panes
 Split the active pane horizontally or vertically, resize by dragging the splitter between panes (double-click a splitter to even them out), and **drag a pane's header** to rearrange. Drop on another pane's **center to swap**, or on its **edge to split** there — a live blue indicator shows where the pane will land. Move focus between panes with `Ctrl+Alt+Arrow`, and **zoom/maximize** the active pane with `Ctrl+Shift+Z` (or double-click its header). The active pane is highlighted with an accent border. Each pane hosts a real shell via node-pty.
 
+### 1b. Tabs
+A tab strip above the tiling area — each tab is its own full pane layout (tmux "windows" on top of the panes). Shells in background tabs **keep running**; an accent dot on the tab shows when a background tab produces output. `Ctrl+Shift+N` opens a new tab, `Ctrl+Tab` / `Ctrl+Shift+Tab` cycle, `Ctrl+Shift+1`–`9` jump directly. Double-click a tab to rename it, drag to reorder, middle-click (or ✕) to close it and its shells. Closing a tab's last pane closes the tab. Tabs are saved with workspaces.
+
 ### 2. Themes (data-driven)
 Themes are **JSON files** in `/themes`, not code. Each defines UI chrome colors, the 16 ANSI terminal colors, and font settings. **Dark is the default** and there's no white flash on launch. Three dark themes ship (dark, One Dark, Dracula). To add one: drop a `.json` file in `/themes` and list it in `themes/index.json` — no code changes. Pick a theme from the toolbar or in Settings; your choice persists.
 
@@ -75,7 +78,7 @@ Themes are **JSON files** in `/themes`, not code. Each defines UI chrome colors,
 Save the current arrangement as a named workspace. A workspace captures the **full pane layout**, each pane's **working directory**, and an optional **startup command** per pane. On launch, mod-term offers to restore your last workspace (or does it silently if you enable "restore on launch" in Settings) so all your project terminals reopen in their arrangement, each `cd`'d into the right project, optionally auto-running a command like `npm run dev` or `claude`.
 
 ### 4. Workspace quick-switcher
-`Ctrl+P` opens a fuzzy switcher to jump between saved project setups.
+`Ctrl+Shift+P` opens a fuzzy switcher to jump between saved project setups.
 
 ### 5. Settings
 `Ctrl+,` opens Settings: default theme, terminal font size, default shell, and "restore last workspace on launch". The shell picker auto-detects available shells on your system (PowerShell 7, Windows PowerShell, Command Prompt, Git Bash, WSL) and prefers PowerShell 7 (`pwsh`) when available. Settings persist to disk (`settings.json` in userData) and apply live.
@@ -196,7 +199,10 @@ npm run dist       # electron-builder -> Windows installer in dist/
 
 | Action | Keys |
 |---|---|
-| New terminal | `Ctrl+Shift+T` |
+| New terminal pane | `Ctrl+Shift+T` |
+| New tab | `Ctrl+Shift+N` |
+| Next / previous tab | `Ctrl+Tab` / `Ctrl+Shift+Tab` |
+| Jump to tab 1–9 | `Ctrl+Shift+1`…`9` |
 | Split side-by-side | `Ctrl+Shift+D` |
 | Split stacked | `Ctrl+Shift+E` |
 | Close active pane | `Ctrl+Shift+W` |
@@ -205,9 +211,15 @@ npm run dist       # electron-builder -> Windows installer in dist/
 | Rearrange by dragging | drag a pane header to an edge of another pane |
 | Rename a terminal | double-click the title text in a pane header |
 | Even out a split | double-click the splitter |
-| Workspace quick-switcher | `Ctrl+P` |
-| Save workspace | `Ctrl+S` |
+| Workspace quick-switcher | `Ctrl+Shift+P` |
+| Save workspace | `Ctrl+Shift+S` |
+| Undo close pane | `Ctrl+Shift+U` |
+| Clear & refresh pane | `Ctrl+Shift+K` |
+| Find in terminal | `Ctrl+Shift+F` (Enter next, Shift+Enter previous, Esc close) |
+| Duplicate pane | `Ctrl+Alt+D` |
+| Font size bigger / smaller / reset | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
 | Settings | `Ctrl+,` |
+| Keyboard shortcuts reference | `Ctrl+Shift+/` (or the `?` toolbar button) |
 
 ---
 
@@ -222,7 +234,7 @@ npm run dist       # electron-builder -> Windows installer in dist/
 - [x] Pane zoom/maximize (`Ctrl+Shift+Z`)
 - [x] Data-driven themes (4 shipped) + picker, dark default, choice persists
 - [x] Workspace save/load/list + restore last (prompt, or silent via setting)
-- [x] Quick-switcher (`Ctrl+P`)
+- [x] Quick-switcher (`Ctrl+Shift+P`)
 - [x] Live cwd tracking via OSC 7 so saves capture the real folder + pane titles from OSC 0/2
 - [x] Settings UI (theme, font size, default shell, restore-on-launch) persisted to disk
 - [x] In-app dark modals (no browser confirm/prompt)

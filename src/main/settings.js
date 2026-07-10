@@ -60,6 +60,9 @@ function write(next) {
   if (merged.fontSize != null && (typeof merged.fontSize !== 'number' || merged.fontSize < 6 || merged.fontSize > 72)) {
     merged.fontSize = DEFAULTS.fontSize;
   }
+  if (merged.fontFamily != null && typeof merged.fontFamily !== 'string') {
+    merged.fontFamily = DEFAULTS.fontFamily;
+  }
   if (merged.scrollbackLines != null) {
     merged.scrollbackLines = Math.min(Math.max(Number(merged.scrollbackLines) || 200, 1), 1000);
   }

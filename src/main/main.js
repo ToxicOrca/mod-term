@@ -13,7 +13,7 @@
 //   <-> xterm.js (renderer).
 // =============================================================================
 
-const { app, BrowserWindow, ipcMain, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, shell: electronShell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -157,6 +157,8 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
+    minWidth: 480,
+    minHeight: 320,
     backgroundColor: '#0d1117',
     title: 'mod-term',
     icon: path.join(__dirname, '..', '..', 'assets', 'icon.ico'),
@@ -171,6 +173,17 @@ function createWindow() {
 
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
+  // Ctrl+click on a URL (WebLinksAddon) calls window.open(). Without this
+  // handler Electron would spawn a new BrowserWindow inside the app; instead,
+  // hand http(s) links to the OS default browser and deny everything else.
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) electronShell.openExternal(url);
+    return { action: 'deny' };
+  });
+  // Terminals render untrusted output — never let the app window itself
+  // navigate away from our local UI.
+  mainWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+
   // Uncomment to open devtools for debugging:
   // mainWindow.webContents.openDevTools({ mode: 'detach' });
 
@@ -179,23 +192,34 @@ function createWindow() {
   // two-step handshake: main asks renderer to save → renderer saves → renderer
   // tells main it's safe to close.
   let closeRequested = false;
-  mainWindow.on('close', (e) => {
+  let closeTimer = null;
+  const win = mainWindow; // capture: mainWindow may be reassigned (macOS re-activate)
+
+  win.on('close', (e) => {
     if (closeRequested) return; // second pass — actually close
     e.preventDefault();
-    mainWindow.webContents.send('app:before-close');
+    win.webContents.send('app:before-close');
     // Safety net: if the renderer doesn't respond within 3s, close anyway.
-    setTimeout(() => {
+    closeTimer = setTimeout(() => {
       closeRequested = true;
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
+      if (!win.isDestroyed()) win.close();
     }, 3000);
   });
 
-  ipcMain.once('app:ready-to-close', () => {
+  // Use .on + explicit cleanup instead of .once: with .once, a second window
+  // created after the first closes (macOS activate) would find the listener
+  // already consumed and always wait out the 3s timeout.
+  const onReadyToClose = () => {
     closeRequested = true;
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close();
-  });
+    clearTimeout(closeTimer);
+    if (!win.isDestroyed()) win.close();
+  };
+  ipcMain.on('app:ready-to-close', onReadyToClose);
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  win.on('closed', () => {
+    ipcMain.removeListener('app:ready-to-close', onReadyToClose);
+    if (mainWindow === win) mainWindow = null;
+  });
 }
 
 // =============================================================================

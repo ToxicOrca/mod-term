@@ -159,6 +159,39 @@ export function alert({ title, message, okLabel = 'OK' }) {
   });
 }
 
+// Read-only keyboard-shortcut reference, rendered as grouped two-column grids.
+// groups: [{ title, items: [[keys, description], ...] }, ...]
+export function shortcuts({ title, groups }) {
+  return openModal({
+    title,
+    okLabel: 'Close',
+    okOnly: true,
+    build: (body) => {
+      for (const g of groups) {
+        const h = document.createElement('div');
+        h.className = 'shortcut-group-title';
+        h.textContent = g.title;
+        body.appendChild(h);
+
+        const grid = document.createElement('div');
+        grid.className = 'shortcut-grid';
+        for (const [keys, desc] of g.items) {
+          const kEl = document.createElement('span');
+          kEl.className = 'shortcut-keys';
+          kEl.textContent = keys;
+          grid.appendChild(kEl);
+          const dEl = document.createElement('span');
+          dEl.className = 'shortcut-desc';
+          dEl.textContent = desc;
+          grid.appendChild(dEl);
+        }
+        body.appendChild(grid);
+      }
+      return () => true;
+    },
+  });
+}
+
 export function prompt({ title, label, value = '', placeholder = '' }) {
   return openModal({
     title,
